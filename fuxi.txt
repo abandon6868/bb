@@ -1,0 +1,392 @@
+组成引出技术点，有什么用 + 细节，出现问题怎么解决
+	思路： 框架组成引出技术点，架构中每个模块的原理
+
+1 linux + shell
+	1 linux 命令
+		增： mkdir touch scp
+		删:  rm
+		改:  cp mv
+		查: cat tail head ps grep find which top df -h 
+	2 shell 高级
+		grep awk sed cut unzipd gz 
+		
+	3 vim
+		x w wq!  gg GG ?a ?/a/b/
+		
+2 Hadoop
+	hadoop常用端口： 9000 50070 8088 19888
+
+	1 hadoop是在分布式集群上存储海量数据并对其进行计算分析的一个开源框架，他主要是有 hdfs +yarn + mapreducer三大组件组成的
+
+	2 hdfs 分布式的文件存储系统，他又三大模块组成： 那三个，这三个又是干什么事的
+		namanode:
+			1 负责管理元数据信息
+			2 负责与客户端进行请求，与datanode进行交互
+			3 保存文件，并且持久化到磁盘中 --大致每次往hdfs上写请求的操作都会记录在edits文件中，在一定的条件下继续合并吗，持久化到新的fsimgae文件中
+		datanode:
+			1 保存真实的数据
+			2 定期向namenode发送心跳
+			3 负责客户端的读写操作
+			4 与别的datanode 进行交互，保持副本同步机制
+		secondnamenod:
+			1 secondenamenode 不是namenode的备份
+			2 secondenamenode 辅助namenode工作的，集群第一次的初始化的时候，namenode 会自己合并 edits和fsimage文件，以后得合并工作都交给了 secondnamenode 来做
+			3 secondenamenode 会定期从namenode中拉取数据，进行合并
+			4 secondenamenode 把合并的数据推送给 namenode，nanode在下次重启时使用最新的的fsimage文件
+
+		hdfs读文件流程：
+			1 分布式文件客户端向 namanode 发送下载请求，下载目标文件
+			2 namanode会根据下载的请求，进行合法性校验【下载路径、权限信息】
+			3 如果合法，namenode 会返回一个目标的文件的元数据信息
+			4 客户端根据namenode 返回的元数据信息，依次去datanode请求下载文件
+
+		hdfs写文件流程：
+			1 客户端向namenode 发起写请求
+			2 namenode 回对客户端的写请求进行合法性校验【权限，输入目录】，并返回一个输出流对象
+			3 校验通过，client 对待上传的文件进行切分，切分是以 128M 为单位进行切分
+			4 客户端会根据 namenode 分配的可写的 datanode 的列表，向距离最近的 datanode节点发送建立通道请求，然后有这个节点依次以 列表中别的节点建立连接通道
+			5 客户端收到datanode返回的请求后，然后客户端就开始往 第一个建立连接的节点发送数据【数据以packet为单位】开始发送，第一个节点收到数据后依次传递给后面的节点
+			6 每条数据发送完成后，会给客户端发送响应，客户端继续发送数据，重复 4-5
+			7 待全部数据发送完成，namenode 给客户端发送响应，
+			8 释放资源
+
+	3 yarn 干啥的
+		1 yarn 它是负责集群任务的调度与资源的分配
+		2 yarn的组成
+			1 resourcemaneager：大总管
+				1 处理与客户端的请求
+				2 处理与 nodemanger的请求
+				3 负责资源的分配与调度
+
+			2 applicationmanager：这个小区的总管
+				1 负责数据的切分
+				2 为应用程序申请资源
+				3 监控任务的状态 与容错 
+
+			3 nodemanager：这个片区总管
+				1 单个节点的资源管理
+				2 单个节点的 applicationmaager的请求
+				3 处理 与resourcemanger的请求
+
+			4 container： 容器
+				封装了一些 cpu，内存，硬盘空间
+
+		2 yarn的工作流程
+			1 client 向 resourceManger 申请一个 任务 application
+			2 rosourceManger 给 client 返回一个 执行该任务的 路径
+			3 client向hdfs 上传 改程序的资源文件
+			4 上传完成后，就向 resourManager 申请执行这个任务
+			5 resourceManager 初始化一个 task
+			6 task 将任务放在队列中，等待有资源执行任务
+			7 资源允许下，将task的任务分配给 nodemanager
+			8 nodemanager 初始化一个contioner，
+			9 contioner 去hdfs拉取 该程序的资源，同时向 rs申请资源
+			10 开始执行 map任务，map执行结束后开始执行 reducer
+			11 任务都执行完成后，释放资源
+
+		3 调度器
+			1 yarn 都那些调度器，能聊一聊？
+				使用调度器可以解决那些问题
+					调度器可以根据业务的重要性来做不同的配置，重要的业务权重高，可以优先执行
+
+				yarn 支持三种队列 FIFO ,公平队列，容量队列
+				FIFO: 单队列，先进先出
+				容量： apache 默认的队列，它是 FIFO 的升级版，支持多队列，先进来的任务有可能先被执行到
+				公平调度器：和 公平调度器容量调度器差不多，都是多队列，但是公平调度器时为队列中的任务平均的分配资源
+
+	4 mapreduce 优化
+		1 输入端 小文件
+			1 采用压缩合并小文件
+			2 采取jvm 重用
+
+		2 shuffle 
+			1 提高溢写空间 
+			2 提高溢写比例
+			3 增大 merge 数量
+			4 采用压缩
+				shuffle 过程 快 ，支持切片 bzip2 lzo
+		3 reduce
+			增加reducer 的数量
+			输出数据是否继续处理，如果还需要继续处理，输出压缩还需要切片
+
+		4 数据倾斜
+			1 分为多次mapreducer执行
+				1 先对key加随机值，可以把任务分配到不同的 节点执行
+				2 第二次map时，再把随机值去掉，在进行合并操作
+
+3 zookeeper
+	1 干啥的用的
+		zookeeper 是一个分布式协调服务系统，主要是来解决数据一致性问题，常用于数据的发布与订阅
+
+	2 zookeeper 选举机制
+		半数选举机制【因为事半数才能防止 zookeeper出现脑裂】
+
+	3 zookeeper常用命令
+		1 get
+		2 ls
+		3 create
+		4 delete
+
+	4 zookeeper 安装台数
+		10台集群   3台zk
+		20台集群   5台zk
+		50台集群   7台zk
+		100台集群  11台zk
+
+4 flume 
+	flume干啥的？
+		flume是一个分布式的日志采集工具
+	1 组成
+		1 组成：source channel sink
+		2 用过那个 source
+			1 taidirsource： 支持多目录，断点续传，1.6版本何如【有bug，会给文件加前缀】，1.7版本使用
+
+			2 taildir 挂了怎么半
+				taildir 挂了不会丢失数据，但可能会导致数据重复
+			3 怎么处理重复数据
+				1 不处理
+				2 到下一级处理
+					1 在hive中 dwd层处理 group by，开窗出第一条
+					2 在sparkstreaming 中处理，借助redis去重
+
+			4 taildir 是否支持遍历文件夹监控： 不支持若需要自定义实现即可
+
+		3 channle 有哪些，怎么选择
+			1 file channel：基于磁盘【100wevent】，可靠性高，传输慢
+			2 memoney channel： 基于内存，传输快【没次存100个event】，可靠性差
+			3 kafka channel： 要求下一级为kafka，基于磁盘存储，数据传输快【没有sink阶段】
+
+		4 sink
+			sink 常用 hdfssink，小问题问题
+			修改三个参数 最重要的 rollcount 禁用
+
+	2 三个器：
+		拦截器
+			1 etl： 处理非法数据
+			2 分类拦截器：将数据流向不同的 topic
+			3 监控器： gaglia
+	3 优化
+		1 filechannel 多目录配置
+			多目录：多磁盘，checkpoint和backupcheckpoint 也建议不同磁盘目录
+		2 小文件： 设置 时间为 1小时 大小滚动为128M rollcount为0，禁止使用 
+		3 内存： 
+			提高自身内存
+
+5 kafka
+	1 基本组成
+		1 kafka干啥的
+			kafka是一个分布式的支持多分区的消息队列
+		2 kafka组成
+			producer、contrllor,zookeeper,consumer
+			zookeeper 中存储了kafka那些信息
+				1 producer的消息没在kafka中
+				2 broker的信息
+				3 isr队列和osr队列的信息
+				4 topic的信息
+				5 partiotion的信息
+				
+
+		3 kafka 安装台数
+			我们安装了3台，
+			我记得阿里有个公式： 2* （峰值 * 副本数/100 +1 
+
+		4 kafka 副本数设置的多少 一般都是设置2个副本，如果对数据可靠性要修特别高，可以设置3个
+
+		5 kafka 分区数设置多少
+			分区数建议大于 kafka集群的数据，一般建议 设置 3~ 10个分区
+			可以对一个分区进行压测测试
+			1个分区压测的生产峰值pm 和消费峰值cm
+			预期值 /min(pm,cm) 
+
+		6 kafka的生产和消费峰值
+			压测
+
+		7 kafka 监控器：
+			kafka manager，eglas
+
+		8 kafka数据保存多久
+			一般保持7天，我们设置为3天
+
+		9 kafka磁盘空间
+			天数 * 每天的数据量 * 副本数/0.7
+
+		10 kafka 数据量
+			100w日活，每天每人100条,一条1M
+ 
+			100w *100  = 1亿
+			每秒数据： 1亿/24/60/60 = 1150条
+			一条日志 为 0.5-2k 就是 1秒1m数据
+
+		11 isr队列
+			它主要是负责 leader的选举用的，只有在isr对列中，才有机会当leader
+
+		12 分区分配策略
+			range和roundrobin两种
+			range是面向主题的，导致数据分布不均匀
+			roundrobin是面向消费者组的，导致消费者组内消费错误的topic
+
+
+	2 挂了
+		挂的是否为 leader
+		1 如果是leader，就需要把leader从isr队列中移除，并把这个broker加入到 osr队列中，再次isr队列中选取出来一个当leader，当这个broker恢复后，可以在从满足加入isr队列的条件后，从新加入isr队列，但不是 leader
+		2 如果不是 leader 挂了，就把这个broker从isr队列中移除，加入到osr队列中，同样恢复后，满足条件加入isr
+
+	3 丢失数据 三种情况
+		ack = -1 
+		ack = 0 
+		ack = 1 
+
+	4 重复数据
+		根据业务重要性选择，处理与不处理
+		处理： 开始幂等行 -- 只在单个会话内有效
+			   幂等性 + ack=-1 + 事务 -- 精确一次消费
+
+	5 数据积压
+		自身消费能力不足，可以增加分区与消费者，提高消费者的消费能力 bacthsize值，同时调整消费者的 内存分配
+		
+
+	6 优化
+		1 提高 kafka的内存【默认为1G】，提高至4-6G，大于6G和6G效果一样
+		2 看消费数据的业务类型，如果是 直接消费，不进行计算的，可以采用压缩
+
+	7 其他
+		1 kafka为啥传输快
+			分布式的支持多分区的，采用顺序读写和零拷贝技术，同时支持消费者组
+
+		2 kafka传输一条消息问2M会怎么样
+			导致 kafka宕机，不能生产也不能消费，【默认最大只能消费1M数据】可以修改参数配置
+
+		3 kafka 数据过期策略
+			1 删除
+			2 压缩
+
+6 hive
+
+	1 hive干啥的
+		hive是数据仓库工具，负责数据的存储，抽取，转换的，hive的底层是mapreducer，hive常用的引擎有 
+		mapreducer，tez，spark
+
+	2 hive与传统数据库区别
+		hive 它在处理数据量特别大时，相比于mysql比较快
+		但是hive值支支持查询操作，不支持增删改
+
+	3 hive 建表
+		内部表：建表语句不同，hive自己管理元数据和真实数据，在删除时会把元数据和原始数据一起删除
+		外部表：hive只管理元数据，删除表只会删除元数据，不会删除实际数据
+
+	4 hive 数据导入导出
+		导入：
+			1 本地： load data local inpath '/' overwrite into table table1
+			2 hdfs： load data path hdfspath overwrite into table table1
+		导出：
+			1 本地：insert overwrite local directory path 'sql'语句
+			2 hdfs： insert overwrite directory  'hdfs'路径' sql语句
+
+	5 hive 文件格式
+		textfile，rcFile，squeneceFile，orc，parquet
+		常用的 textFile，orc，parquet
+		orc格式的文件，支持压缩，不管配合lzo、snappy 都可以
+		parquet：自身支持压缩，当配合lzo使用时，就需要使用 seder进行设置
+		常用组合： parquet + lzo 
+
+	6 hive 排序
+		1 order by: 全局排序
+		2 sort by： 单个task内排序
+		3 dirstribute by： 单个分区内排序，通常和 sort by 结合使用
+		4 cluster by ：当 sort by和dirstribute by字段相同时，可以使用cluter by替代
+
+	7 函数
+		内置基本函数：
+			1 if 
+			2 case when condition then 
+			3 nvl
+			4 cast(1,int)
+			5 get_json_object()
+			6 concat 
+			6 coalese()
+			7 concat_ws()
+			8 str_to_map
+
+		内置时间函数：
+			1 处理日：date_add()  date_sub()
+			2 处理周：next_day()
+			3 处理月：last_day()
+			4 时间格式化： to_date()
+		内置开窗函数：
+			1 row_num() over(partition by a orderby b desc) 1 2 3 4
+			2 ranK() 1 1  3
+			3 dense_rank() 1 1 2
+
+	8 hive自定义函数
+		udf： 重写 evalute 方法
+		udtf：重写 G..udtf
+			1 打包-》上传至 hdfs
+			2 创建 永久函数
+
+	9 seder 
+		常见与解析json文件格式的数据，在建表时需要配合 seder使用
+		1 临时生效 ： add jar方式
+		2 全局生效： 配置到 hive-site.xml中
+
+	10 hive数据类型
+		array
+		map
+		struct
+
+	11 hive 分区表
+		静态和动态分区两种
+		1 静态 在插入数据时直接指定了分区
+			insert into table partition(dt='2021-0505')
+
+		2 动态分区在插入数据时 使用动态的值获取
+			insert into table partition(dt=${dt})
+
+	12 hive 表连接
+		1 内连接： join
+		2 外连接 left join
+		3 右外： right join
+		4 全连接： full join
+		5 union ：去重
+		6 union all： 不去重，要求字段一致
+
+	13 hive执行方式
+		hive -e "$sql"
+		hive -f test.sql
+
+	14 hive遇到的故障
+		在往hive中导入数据时，导入失败，研究了大半天，发现原始数据表中存在 \N 字符，
+		解决办法，使用 replace，替换
+
+	15 hive优化
+		map输入端
+			1 关闭 mapjoin
+			2 行列过滤
+			3 创建分区表
+			4 小文件合并
+				1 使用combiner 合并文件 作为输入
+				2 开启jvm重用
+			5 设置合理的 map和reducer个数
+			6 数据压缩
+		数据倾斜
+			1 是否有空值造成的
+				1 
+
+7 sqoop
+	1 干啥的，啥原理
+		是 一个数据抽取用的工具，底层还是采用的 mapreducer，只有map操作
+
+	2 遇到过那些坑
+		在数据导如hive时，一直导入失败，后来发现是原始数据中存在 \N,
+		解决办法，就是 使用 replace 函数将 \N 做替换
+
+	3 发生数据倾斜怎么解决
+		1 增加map个数
+		2 观察数据分布，可采取抽样
+		3 在 --query 语句中添加一个字段，作为分割字段
+		4 指定这个字段为分割字段
+			具体思路： 设置分割边界：最小值为1 最大值为 count(1) 导出的总条数
+
+	4 到处是数据一致性问题怎么处理
+		添加 --tableTag  --tableclear 临时表  先导入临时表，在写入到 mysql表中
+			实践
+
